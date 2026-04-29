@@ -1,4 +1,5 @@
 import sys
+import argparse
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -15,7 +16,11 @@ from src.metrics_sum import compute_rouge
 
 
 def main():
-    with open("configs/base.yaml", "r", encoding="utf-8") as f:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="configs/base.yaml")
+    args = parser.parse_args()
+
+    with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     task_name = cfg["task"]["name"]
@@ -24,6 +29,7 @@ def main():
 
     model_name = cfg["model"]["name"]
     architecture = cfg["model"]["architecture"]
+    use_4bit = cfg["model"].get("use_4bit", False)
 
     max_input_tokens = cfg["generation"]["max_input_tokens"]
     max_new_tokens = cfg["generation"]["max_new_tokens"]
@@ -36,7 +42,12 @@ def main():
     data = load_jsonl(data_path)[:max_samples]
     print("Loaded samples:", len(data))
 
-    model, tokenizer = load_model_and_tokenizer(model_name, architecture, device)
+    model, tokenizer = load_model_and_tokenizer(
+        model_name=model_name,
+        architecture=architecture,
+        device=device,
+        use_4bit=use_4bit,
+    )
 
     results = []
     for idx, sample in enumerate(data):
@@ -60,8 +71,7 @@ def main():
             out["prediction_postprocessed"] = extract_short_answer(out["prediction"])
             print(
                 f"[{idx + 1}/{len(data)}] done | "
-                f"raw={out['prediction']} | "
-                f"post={out['prediction_postprocessed']}"
+                f"raw={out['prediction']} | post={out['prediction_postprocessed']}"
             )
         else:
             out["prediction_clean"] = out["prediction"]
@@ -78,7 +88,7 @@ def main():
     metrics_dir = Path(cfg["output"]["metrics_dir"])
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    model_slug = model_name.split("/")[-1].replace(".", "_")
+    model_slug = model_name.split("/")[-1].replace(".", "_").replace("/", "_")
 
     pred_path = out_dir / f"{task_name}_{model_slug}.csv"
     df.to_csv(pred_path, index=False, encoding="utf-8-sig")
@@ -111,7 +121,7 @@ def main():
             "avg_output_tokens": float(df["output_tokens"].mean()),
         }])
 
-    elif task_name == "summarization":
+    else:
         preds = [r["prediction"] for r in results]
         refs = [r["reference"] for r in results]
         rouge_scores = compute_rouge(preds, refs)
@@ -134,8 +144,6 @@ def main():
     metrics.to_csv(metric_path, index=False, encoding="utf-8-sig")
     print("Saved metrics to:", metric_path)
     print(metrics)
-
-    print(df.head())
 
 
 if __name__ == "__main__":

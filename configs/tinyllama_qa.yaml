@@ -1,0 +1,25 @@
+project_name: "long-context-comparison"
+
+task:
+  name: "qa"
+  data_path: "data/processed/pilot_qa.jsonl"
+  max_samples: 5
+
+model:
+  name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+  architecture: "decoder-only"
+  use_4bit: false
+
+generation:
+  max_input_tokens: 512
+  max_new_tokens: 64
+  do_sample: false
+  temperature: 0.0
+
+runtime:
+  device: "auto"
+
+output:
+  predictions_dir: "outputs/predictions"
+  metrics_dir: "outputs/metrics"
+  logs_dir: "outputs/logs"

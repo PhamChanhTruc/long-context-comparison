@@ -6,8 +6,9 @@ task:
   max_samples: 5
 
 model:
-  name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-  architecture: "decoder-only"
+  name: "google/flan-t5-base"
+  architecture: "encoder-decoder"
+  use_4bit: false
 
 generation:
   max_input_tokens: 512

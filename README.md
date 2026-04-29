@@ -1,43 +1,48 @@
-# Long Context Comparison
+# Long Context Comparison / So sánh mô hình trên ngữ cảnh dài
 
-So sanh hieu nang mo hinh tren bai toan ngu canh dai.  
-Compare model performance on long-context NLP tasks.
+## Overview / Tổng quan
 
-## Overview | Tong quan
+This is an experimental project for comparing decoder-only and encoder-decoder models on long-context NLP tasks.  
+Đây là project thực nghiệm để so sánh mô hình decoder-only và encoder-decoder trên các bài toán NLP với ngữ cảnh dài.
 
-Du an nay danh gia hai nhom mo hinh:
-- `encoder-decoder`
-- `decoder-only`
+Current tasks:  
+Các tác vụ hiện tại:
 
-Tren hai tac vu:
-- `QA`
-- `Summarization`
+- QA / Trả lời câu hỏi
+- Summarization / Tóm tắt văn bản
 
-This project benchmarks two model groups:
-- `encoder-decoder`
-- `decoder-only`
+## Project Structure / Cấu trúc project
 
-Across two tasks:
-- `QA`
-- `Summarization`
-
-## Project Structure | Cau truc du an
+Current repository structure:  
+Cấu trúc hiện tại của repository:
 
 ```text
 long-context-comparison/
 |-- configs/
-|   `-- base.yaml
+|   |-- flan_qa.yaml
+|   |-- flan_sum.yaml
+|   |-- longt5_qa.yaml
+|   |-- longt5_sum.yaml
+|   |-- mistral_qa.yaml
+|   |-- mistral_sum.yaml
+|   |-- tinyllama_qa.yaml
+|   `-- tinyllama_sum.yaml
 |-- data/
 |   `-- processed/
 |       |-- pilot_qa.jsonl
 |       `-- pilot_sum.jsonl
+|-- notebooks/
 |-- outputs/
+|   |-- figures/
+|   |-- logs/
 |   |-- metrics/
 |   `-- predictions/
+|-- reports/
 |-- scripts/
 |   |-- compare_metrics.py
 |   `-- run_inference.py
 |-- src/
+|   |-- __init__.py
 |   |-- inference.py
 |   |-- loaders.py
 |   |-- metrics_qa.py
@@ -50,104 +55,142 @@ long-context-comparison/
 `-- README.md
 ```
 
-## Installation | Cai dat
+## Installation / Cài đặt
 
 Windows PowerShell:
 
 ```powershell
 python -m venv venv
-.\venv\Scripts\Activate.ps1
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Neu chua co `requirements.txt` day du, ban co the cai thu cong:
+`requirements.txt` is currently empty or incomplete, so the actual install command is:  
+`requirements.txt` hiện chưa phản ánh đầy đủ dependency, nên lệnh cài đặt thực tế nên là:
 
 ```powershell
-pip install transformers datasets evaluate accelerate sentencepiece rouge_score pandas matplotlib pyyaml
+pip install torch transformers accelerate sentencepiece evaluate rouge_score pandas pyyaml
 ```
 
-If `requirements.txt` is incomplete, you can install the core packages manually:
+Optional for CUDA 4-bit runs such as `mistral_qa.yaml` and `mistral_sum.yaml`:  
+Tuỳ chọn cho chạy CUDA 4-bit như `mistral_qa.yaml` và `mistral_sum.yaml`:
 
 ```powershell
-pip install transformers datasets evaluate accelerate sentencepiece rouge_score pandas matplotlib pyyaml
+pip install bitsandbytes
 ```
 
-## Usage | Cach dung
+## Configuration / Cấu hình
+
+Configs are stored in `configs/`.  
+Các file cấu hình nằm trong `configs/`.
+
+Current config files:  
+Các file cấu hình hiện có:
+
+- `configs/flan_qa.yaml`
+- `configs/flan_sum.yaml`
+- `configs/longt5_qa.yaml`
+- `configs/longt5_sum.yaml`
+- `configs/mistral_qa.yaml`
+- `configs/mistral_sum.yaml`
+- `configs/tinyllama_qa.yaml`
+- `configs/tinyllama_sum.yaml`
+
+Run a config with:  
+Chạy một cấu hình bằng:
+
+```powershell
+python scripts\run_inference.py --config <config_path>
+```
+
+Examples:  
+Ví dụ:
+
+```powershell
+python scripts\run_inference.py --config configs/flan_qa.yaml
+python scripts\run_inference.py --config configs/tinyllama_qa.yaml
+python scripts\run_inference.py --config configs/longt5_sum.yaml
+python scripts\run_inference.py --config configs/mistral_sum.yaml
+```
+
+## Data Format / Định dạng dữ liệu
+
+QA JSONL example:  
+Ví dụ JSONL cho QA:
+
+```json
+{"id":"qa_001","task":"qa","context":"Paris is the capital of France.","question":"What is the capital of France?","answers":["Paris"]}
+```
+
+Summarization JSONL example:  
+Ví dụ JSONL cho tóm tắt:
+
+```json
+{"id":"sum_001","task":"summarization","context":"Machine learning is a field of artificial intelligence that focuses on building systems that learn from data.","reference":"Machine learning is an AI field about systems that learn from data."}
+```
+
+Current processed data files:  
+Các file dữ liệu đã xử lý hiện có:
+
+- `data/processed/pilot_qa.jsonl`
+- `data/processed/pilot_sum.jsonl`
+
+## Usage / Cách chạy
+
+Supported commands in the current codebase:  
+Các lệnh hiện được codebase hỗ trợ:
 
 ```powershell
 python test_load_data.py
 python test_model_qa.py
-python scripts\run_inference.py
+python scripts\run_inference.py --config configs/flan_qa.yaml
+python scripts\run_inference.py --config configs/tinyllama_qa.yaml
 python scripts\compare_metrics.py
 ```
 
-## Configuration | Cau hinh
+Additional available configs:  
+Các config bổ sung hiện có:
 
-Chinh sua `configs/base.yaml` de chon:
-- task (`qa` hoac `summarization`)
-- dataset path
-- model name
-- model architecture (`encoder-decoder` hoac `decoder-only`)
-- generation settings
+- `configs/flan_sum.yaml`
+- `configs/longt5_qa.yaml`
+- `configs/longt5_sum.yaml`
+- `configs/mistral_qa.yaml`
+- `configs/mistral_sum.yaml`
+- `configs/tinyllama_sum.yaml`
 
-Edit `configs/base.yaml` to select:
-- task (`qa` or `summarization`)
-- dataset path
-- model name
-- model architecture (`encoder-decoder` or `decoder-only`)
-- generation settings
+## Outputs / Kết quả đầu ra
 
-## Outputs | Dau ra
+- `outputs/predictions/`: per-run prediction CSV files.  
+  `outputs/predictions/`: các file CSV prediction cho từng lần chạy.
+- `outputs/metrics/`: per-run metric CSV files.  
+  `outputs/metrics/`: các file CSV metric cho từng lần chạy.
+- `outputs/metrics/all_metrics_comparison.csv`: comparison file generated by `python scripts\compare_metrics.py`.  
+  `outputs/metrics/all_metrics_comparison.csv`: file tổng hợp được tạo bởi `python scripts\compare_metrics.py`.
 
-Thu muc ket qua:
-- `outputs/predictions/`: file du doan theo tung model va task
-- `outputs/metrics/`: file metric cho tung lan chay va file tong hop
+Current output folders also include `outputs/logs/` and `outputs/figures/`.  
+Thư mục output hiện tại cũng có `outputs/logs/` và `outputs/figures/`.
 
-Output folders:
-- `outputs/predictions/`: prediction files for each model-task run
-- `outputs/metrics/`: per-run metric files and the aggregated comparison file
+## Metrics / Chỉ số đánh giá
 
-Vi du file:
-- `outputs/predictions/qa_flan-t5-base.csv`
-- `outputs/predictions/summarization_TinyLlama-1_1B-Chat-v1_0.csv`
-- `outputs/metrics/qa_flan-t5-base_metrics.csv`
-- `outputs/metrics/all_metrics_comparison.csv`
+For QA / Với QA:
 
-## Metrics | Chi so danh gia
+- `raw_exact_match`
+- `raw_f1`
+- `post_exact_match`
+- `post_f1`
 
-QA:
-- `raw_exact_match`: do trung khop chinh xac tren dau ra goc
-- `raw_f1`: F1 tren dau ra goc
-- `post_exact_match`: Exact Match sau hau xu ly cau tra loi ngan
-- `post_f1`: F1 sau hau xu ly
+For summarization / Với tóm tắt:
 
-Summarization:
-- `rouge1`: overlap unigram
-- `rouge2`: overlap bigram
-- `rougeL`: longest common subsequence
-- `rougeLsum`: ROUGE-L cho tom tat muc tai lieu
+- `rouge1`
+- `rouge2`
+- `rougeL`
+- `rougeLsum`
 
-Efficiency:
-- `avg_latency_sec`: thoi gian suy luan trung binh moi mau
-- `avg_input_tokens`: so token dau vao trung binh
-- `avg_output_tokens`: so token dau ra trung binh
+Efficiency metrics / Chỉ số hiệu năng:
 
-QA:
-- `raw_exact_match`: exact string match on raw predictions
-- `raw_f1`: token-level F1 on raw predictions
-- `post_exact_match`: Exact Match after short-answer post-processing
-- `post_f1`: F1 after post-processing
-
-Summarization:
-- `rouge1`: unigram overlap
-- `rouge2`: bigram overlap
-- `rougeL`: longest common subsequence score
-- `rougeLsum`: summary-level ROUGE-L
-
-Efficiency:
-- `avg_latency_sec`: average inference latency per sample
-- `avg_input_tokens`: average number of input tokens
-- `avg_output_tokens`: average number of output tokens
+- `avg_latency_sec`
+- `avg_input_tokens`
+- `avg_output_tokens`
 
 ## QA Post-processing / Hậu xử lý cho QA
 
@@ -169,8 +212,8 @@ To make evaluation fairer, the project includes a post-processing step that extr
 Pilot runs suggest:  
 Kết quả pilot ban đầu cho thấy:
 
-- Encoder–decoder is faster on CPU  
-  Encoder–decoder chạy nhanh hơn trên CPU
+- Encoder-decoder is faster on CPU  
+  Encoder-decoder chạy nhanh hơn trên CPU
 - Decoder-only produces more natural answers  
   Decoder-only tạo câu trả lời tự nhiên hơn
 - QA results improve significantly after post-processing for decoder-only models  
@@ -182,8 +225,8 @@ Kết quả pilot ban đầu cho thấy:
 
 1. Prepare data in `data/processed/`  
    Chuẩn bị dữ liệu trong `data/processed/`
-2. Edit `configs/base.yaml`  
-   Chỉnh `configs/base.yaml`
+2. Edit config files in `configs/`  
+   Chỉnh file cấu hình trong `configs/`
 3. Run `run_inference.py`  
    Chạy `run_inference.py`
 4. Save predictions and metrics in `outputs/`  
@@ -214,3 +257,4 @@ Kết quả pilot ban đầu cho thấy:
   Nếu `do_sample=False`, tham số `temperature` có thể bị bỏ qua.
 - Decoder-only outputs are often longer, so QA post-processing is important.  
   Đầu ra của decoder-only thường dài hơn, nên hậu xử lý QA là cần thiết.
+
