@@ -2,20 +2,34 @@ import time
 import torch
 
 
-def build_decoder_inputs(tokenizer, prompt, device):
-    # Nếu tokenizer có chat template, ưu tiên dùng template
+def build_decoder_inputs(tokenizer, prompt, device, max_input_tokens):
+    # Nếu tokenizer có chat template (ví dụ Mistral Instruct), dùng template đó
     if getattr(tokenizer, "chat_template", None):
         messages = [{"role": "user", "content": prompt}]
-        input_ids = tokenizer.apply_chat_template(
+        encoded = tokenizer.apply_chat_template(
             messages,
             tokenize=True,
             add_generation_prompt=True,
             return_tensors="pt",
+            return_dict=True,
         )
-        return {"input_ids": input_ids.to(device)}
+        encoded = {k: v.to(device) for k, v in encoded.items()}
     else:
-        inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
-        return {k: v.to(device) for k, v in inputs.items()}
+        encoded = tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_input_tokens,
+        )
+        encoded = {k: v.to(device) for k, v in encoded.items()}
+
+    # truncate thủ công nếu input quá dài
+    if encoded["input_ids"].shape[1] > max_input_tokens:
+        encoded["input_ids"] = encoded["input_ids"][:, -max_input_tokens:]
+        if "attention_mask" in encoded:
+            encoded["attention_mask"] = encoded["attention_mask"][:, -max_input_tokens:]
+
+    return encoded
 
 
 def run_one_sample(
@@ -35,11 +49,12 @@ def run_one_sample(
     prompt = build_prompt_fn(sample, task_name)
 
     if architecture == "decoder-only":
-        inputs = build_decoder_inputs(tokenizer, prompt, model.device if hasattr(model, "device") else device)
-
-        # truncate input_ids manually if quá dài
-        if "input_ids" in inputs and inputs["input_ids"].shape[1] > max_input_tokens:
-            inputs["input_ids"] = inputs["input_ids"][:, -max_input_tokens:]
+        inputs = build_decoder_inputs(
+            tokenizer=tokenizer,
+            prompt=prompt,
+            device=device,
+            max_input_tokens=max_input_tokens,
+        )
 
         input_tokens = inputs["input_ids"].shape[1]
 
