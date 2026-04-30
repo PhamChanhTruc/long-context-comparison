@@ -12,7 +12,7 @@ model:
 
 generation:
   max_input_tokens: 2048
-  max_new_tokens: 64
+  max_new_tokens: 32
   do_sample: false
   temperature: 0.0
 
