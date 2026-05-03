@@ -46,7 +46,7 @@ def run_one_sample(
     temperature,
     build_prompt_fn,
 ):
-    prompt = build_prompt_fn(sample, task_name)
+    prompt = build_prompt_fn(sample, task_name, model_name)
 
     if architecture == "decoder-only":
         inputs = build_decoder_inputs(
