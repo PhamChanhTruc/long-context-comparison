@@ -1,10 +1,9 @@
-def build_prompt(sample, task_name):
+def build_prompt(sample, task_name, model_name=None):
     if task_name == "qa":
         return f"""Read the following context and answer the question using only information from the context.
 
 Instructions:
 - Give a short answer only.
-- Prefer the shortest exact answer span from the context.
 - Do not explain.
 - Do not summarize the document.
 - Do not repeat the question.
