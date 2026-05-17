@@ -1,61 +1,33 @@
-# Long Context Comparison / So sánh mô hình trên ngữ cảnh dài
+# Long Context Comparison
 
-## Overview / Tổng quan
+Final NLP project for comparing encoder-decoder and decoder-only language models on
+long-context tasks.
 
-This is an experimental project for comparing decoder-only and encoder-decoder models on long-context NLP tasks.  
-Đây là project thực nghiệm để so sánh mô hình decoder-only và encoder-decoder trên các bài toán NLP với ngữ cảnh dài.
+## Project Goal
 
-Current tasks:  
-Các tác vụ hiện tại:
+The project runs zero-shot inference on two tasks and compares quality and latency:
 
-- QA / Trả lời câu hỏi
-- Summarization / Tóm tắt văn bản
+- Question Answering
+- Summarization
 
-## Project Structure / Cấu trúc project
+Model groups:
 
-Current repository structure:  
-Cấu trúc hiện tại của repository:
+- Encoder-decoder: FLAN-T5, LongT5
+- Decoder-only: TinyLlama, Mistral
+
+## Repository Structure
 
 ```text
-long-context-comparison/
-|-- configs/
-|   |-- flan_qa.yaml
-|   |-- flan_sum.yaml
-|   |-- longt5_qa.yaml
-|   |-- longt5_sum.yaml
-|   |-- mistral_qa.yaml
-|   |-- mistral_sum.yaml
-|   |-- tinyllama_qa.yaml
-|   `-- tinyllama_sum.yaml
-|-- data/
-|   `-- processed/
-|       |-- pilot_qa.jsonl
-|       `-- pilot_sum.jsonl
-|-- notebooks/
-|-- outputs/
-|   |-- figures/
-|   |-- logs/
-|   |-- metrics/
-|   `-- predictions/
-|-- reports/
-|-- scripts/
-|   |-- compare_metrics.py
-|   `-- run_inference.py
-|-- src/
-|   |-- __init__.py
-|   |-- inference.py
-|   |-- loaders.py
-|   |-- metrics_qa.py
-|   |-- metrics_sum.py
-|   |-- model_utils.py
-|   `-- prompts.py
-|-- test_load_data.py
-|-- test_model_qa.py
-|-- requirements.txt
-`-- README.md
+configs/                 YAML experiment configs
+data/processed/           Pilot JSONL data and optional prepared main data
+scripts/                  Validation, data prep, inference, comparison scripts
+src/                      Data loading, prompts, inference, metrics, model utilities
+outputs/                  Local predictions, metrics, logs, and figures (gitignored)
+test_load_data.py         Lightweight data/config tests
+test_model_qa.py          Lightweight QA metric and inference-output tests
 ```
 
-## Installation / Cài đặt
+## Installation
 
 Windows PowerShell:
 
@@ -65,196 +37,149 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` is currently empty or incomplete, so the actual install command is:  
-`requirements.txt` hiện chưa phản ánh đầy đủ dependency, nên lệnh cài đặt thực tế nên là:
+Linux or Colab:
 
-```powershell
-pip install torch transformers accelerate sentencepiece evaluate rouge_score pandas pyyaml
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Optional for CUDA 4-bit runs such as `mistral_qa.yaml` and `mistral_sum.yaml`:  
-Tuỳ chọn cho chạy CUDA 4-bit như `mistral_qa.yaml` và `mistral_sum.yaml`:
+`bitsandbytes` is optional and only needed for CUDA 4-bit configs such as Mistral.
+Install it separately when your CUDA environment supports it:
 
-```powershell
+```bash
 pip install bitsandbytes
 ```
 
-## Configuration / Cấu hình
+## Data
 
-Configs are stored in `configs/`.  
-Các file cấu hình nằm trong `configs/`.
-
-Current config files:  
-Các file cấu hình hiện có:
-
-- `configs/flan_qa.yaml`
-- `configs/flan_sum.yaml`
-- `configs/longt5_qa.yaml`
-- `configs/longt5_sum.yaml`
-- `configs/mistral_qa.yaml`
-- `configs/mistral_sum.yaml`
-- `configs/tinyllama_qa.yaml`
-- `configs/tinyllama_sum.yaml`
-
-Run a config with:  
-Chạy một cấu hình bằng:
-
-```powershell
-python scripts\run_inference.py --config <config_path>
-```
-
-Examples:  
-Ví dụ:
-
-```powershell
-python scripts\run_inference.py --config configs/flan_qa.yaml
-python scripts\run_inference.py --config configs/tinyllama_qa.yaml
-python scripts\run_inference.py --config configs/longt5_sum.yaml
-python scripts\run_inference.py --config configs/mistral_sum.yaml
-```
-
-## Data Format / Định dạng dữ liệu
-
-QA JSONL example:  
-Ví dụ JSONL cho QA:
-
-```json
-{"id":"qa_001","task":"qa","context":"Paris is the capital of France.","question":"What is the capital of France?","answers":["Paris"]}
-```
-
-Summarization JSONL example:  
-Ví dụ JSONL cho tóm tắt:
-
-```json
-{"id":"sum_001","task":"summarization","context":"Machine learning is a field of artificial intelligence that focuses on building systems that learn from data.","reference":"Machine learning is an AI field about systems that learn from data."}
-```
-
-Current processed data files:  
-Các file dữ liệu đã xử lý hiện có:
+Pilot files are included:
 
 - `data/processed/pilot_qa.jsonl`
 - `data/processed/pilot_sum.jsonl`
 
-## Usage / Cách chạy
+Validate the JSONL files:
 
-Supported commands in the current codebase:  
-Các lệnh hiện được codebase hỗ trợ:
-
-```powershell
-python test_load_data.py
-python test_model_qa.py
-python scripts\run_inference.py --config configs/flan_qa.yaml
-python scripts\run_inference.py --config configs/tinyllama_qa.yaml
-python scripts\compare_metrics.py
+```bash
+python scripts/validate_data.py
 ```
 
-Additional available configs:  
-Các config bổ sung hiện có:
+Each QA line must contain `id`, `task`, `context`, `question`, and a non-empty
+`answers` list. Each summarization line must contain `id`, `task`, `context`, and
+`reference`.
 
-- `configs/flan_sum.yaml`
-- `configs/longt5_qa.yaml`
-- `configs/longt5_sum.yaml`
-- `configs/mistral_qa.yaml`
-- `configs/mistral_sum.yaml`
-- `configs/tinyllama_sum.yaml`
+Optionally prepare larger validation samples from Hugging Face datasets:
 
-## Outputs / Kết quả đầu ra
+```bash
+python scripts/prepare_data.py --qa_samples 50 --sum_samples 50
+```
 
-- `outputs/predictions/`: per-run prediction CSV files.  
-  `outputs/predictions/`: các file CSV prediction cho từng lần chạy.
-- `outputs/metrics/`: per-run metric CSV files.  
-  `outputs/metrics/`: các file CSV metric cho từng lần chạy.
-- `outputs/metrics/all_metrics_comparison.csv`: comparison file generated by `python scripts\compare_metrics.py`.  
-  `outputs/metrics/all_metrics_comparison.csv`: file tổng hợp được tạo bởi `python scripts\compare_metrics.py`.
+This writes `data/processed/main_qa.jsonl` and `data/processed/main_sum.jsonl`.
+If the datasets cannot be downloaded, the script fails with a clear message.
 
-Current output folders also include `outputs/logs/` and `outputs/figures/`.  
-Thư mục output hiện tại cũng có `outputs/logs/` và `outputs/figures/`.
+## Running Inference
 
-## Metrics / Chỉ số đánh giá
+Run one config:
 
-For QA / Với QA:
+```bash
+python scripts/run_inference.py --config configs/flan_qa.yaml
+```
 
-- `raw_exact_match`
-- `raw_f1`
-- `post_exact_match`
-- `post_f1`
+Other included pilot configs:
 
-For summarization / Với tóm tắt:
+```bash
+python scripts/run_inference.py --config configs/flan_sum.yaml
+python scripts/run_inference.py --config configs/longt5_qa.yaml
+python scripts/run_inference.py --config configs/longt5_sum.yaml
+python scripts/run_inference.py --config configs/tinyllama_qa.yaml
+python scripts/run_inference.py --config configs/tinyllama_sum.yaml
+python scripts/run_inference.py --config configs/mistral_qa.yaml
+python scripts/run_inference.py --config configs/mistral_sum.yaml
+```
 
-- `rouge1`
-- `rouge2`
-- `rougeL`
-- `rougeLsum`
+PowerShell loop for all configs:
 
-Efficiency metrics / Chỉ số hiệu năng:
+```powershell
+Get-ChildItem configs\*.yaml | ForEach-Object {
+  python scripts\run_inference.py --config $_.FullName
+}
+```
 
-- `avg_latency_sec`
-- `avg_input_tokens`
-- `avg_output_tokens`
+Bash loop for all configs:
 
-## QA Post-processing / Hậu xử lý cho QA
+```bash
+for cfg in configs/*.yaml; do
+  python scripts/run_inference.py --config "$cfg"
+done
+```
 
-For QA, decoder-only models often produce full-sentence answers such as:  
-Trong QA, mô hình decoder-only thường sinh câu trả lời đầy đủ như:
+Large models may require a GPU, enough RAM/VRAM, Hugging Face access, and prior
+model downloads. The 4-bit Mistral configs require CUDA plus `bitsandbytes`.
 
-`The capital of France is Paris.`
+## Comparing Metrics
 
-Instead of the short answer:  
-Thay vì câu trả lời ngắn:
+After one or more runs:
 
-`Paris`
+```bash
+python scripts/compare_metrics.py
+```
 
-To make evaluation fairer, the project includes a post-processing step that extracts shorter answers before computing metrics.  
-Để việc đánh giá công bằng hơn, project có thêm bước hậu xử lý nhằm trích xuất câu trả lời ngắn trước khi tính metric.
+The script reads `outputs/metrics/*_metrics.csv`, writes
+`outputs/metrics/all_metrics_comparison.csv`, task-specific comparison CSVs, a
+leaderboard, and optional simple figures in `outputs/figures/` when matplotlib is
+installed.
 
-## Current Pilot Findings / Kết quả pilot hiện tại
+## QA Metrics
 
-Pilot runs suggest:  
-Kết quả pilot ban đầu cho thấy:
+QA predictions store:
 
-- Encoder-decoder is faster on CPU  
-  Encoder-decoder chạy nhanh hơn trên CPU
-- Decoder-only produces more natural answers  
-  Decoder-only tạo câu trả lời tự nhiên hơn
-- QA results improve significantly after post-processing for decoder-only models  
-  Kết quả QA cải thiện rõ sau hậu xử lý với decoder-only
-- Decoder-only performs better on pilot summarization ROUGE, but with much higher latency  
-  Decoder-only cho ROUGE tốt hơn ở pilot summarization, nhưng độ trễ cao hơn đáng kể
+- `raw_prediction`: exact decoded model output
+- `post_prediction`: cleaned answer used for post-processed QA metrics
+- `references_json`: JSON list containing all gold answers
 
-## Workflow / Quy trình làm việc
+Raw QA metrics use `raw_prediction`. Post QA metrics use `post_prediction`.
+Exact Match and token-level F1 are computed against all gold answers and take the
+best score per sample.
 
-1. Prepare data in `data/processed/`  
-   Chuẩn bị dữ liệu trong `data/processed/`
-2. Edit config files in `configs/`  
-   Chỉnh file cấu hình trong `configs/`
-3. Run `run_inference.py`  
-   Chạy `run_inference.py`
-4. Save predictions and metrics in `outputs/`  
-   Lưu predictions và metrics vào `outputs/`
-5. Run `compare_metrics.py` for comparison  
-   Chạy `compare_metrics.py` để tổng hợp kết quả
+QA post-processing removes common prompt echoes such as `Answer:`, `The answer is`,
+and copied instruction fragments. Summarization outputs are not aggressively
+post-processed.
 
-## Next Steps / Hướng phát triển tiếp theo
+## Truncation Strategy
 
-- increase pilot size from 5 to 20, 50, or 100 samples  
-  tăng số mẫu pilot từ 5 lên 20, 50 hoặc 100
-- move experiments to Colab  
-  chuyển thực nghiệm lên Colab
-- test longer contexts  
-  thử độ dài ngữ cảnh lớn hơn
-- add larger models  
-  thêm các mô hình lớn hơn
-- create comparison plots  
-  vẽ biểu đồ so sánh
-- write the experimental report section  
-  viết chương thực nghiệm cho báo cáo
+The code enforces `generation.max_input_tokens` before generation. It first builds
+the task prompt, then trims only the context if the prompt is too long.
 
-## Notes / Ghi chú
+- QA preserves the question and answer instruction near the end of the prompt.
+- Summarization preserves the summary instruction and as much document context as
+  possible.
+- Context truncation is deterministic from the beginning of the context.
+- A warning is logged whenever context tokens are removed.
+- If the fixed prompt/question alone exceeds the token budget, inference fails
+  with a helpful error instead of sending an over-length input to the model.
 
-- The first model download from Hugging Face may take a while.  
-  Lần đầu tải model từ Hugging Face có thể mất thời gian.
-- If `do_sample=False`, the `temperature` argument may be ignored.  
-  Nếu `do_sample=False`, tham số `temperature` có thể bị bỏ qua.
-- Decoder-only outputs are often longer, so QA post-processing is important.  
-  Đầu ra của decoder-only thường dài hơn, nên hậu xử lý QA là cần thiết.
+For fair final experiments, use the same `max_input_tokens` across the model configs
+you want to compare.
 
+## Tests
+
+Run lightweight checks:
+
+```bash
+python test_load_data.py
+python test_model_qa.py
+python -m pytest
+```
+
+These tests do not download models. They validate JSONL loading, config loading,
+multiple-answer QA metrics, QA post-processing, and preservation of all gold answers
+in prediction outputs.
+
+## Known Limitations
+
+- Pilot data is very small and should not be treated as a final result.
+- Inference is zero-shot unless configs and prompts are changed.
+- Truncation may remove evidence from long documents.
+- Local hardware can limit model size, speed, and quantization support.
+- Dataset preparation depends on Hugging Face availability or cached datasets.

@@ -1,9 +1,12 @@
 project_name: "long-context-comparison"
+run_name: "tinyllama_sum"
 
 task:
   name: "summarization"
   data_path: "data/processed/pilot_sum.jsonl"
   max_samples: 5
+  shuffle: false
+  seed: 42
 
 model:
   name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"

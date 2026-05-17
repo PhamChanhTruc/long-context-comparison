@@ -1,5 +1,16 @@
 **/__pycache__/
 *.pyc
 venv/
+.venv/
+.pytest_cache/
 outputs/
 .ipynb_checkpoints/
+.env
+.env.*
+.cache/
+models/
+checkpoints/
+*.bin
+*.safetensors
+*.pt
+*.pth

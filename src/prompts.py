@@ -1,35 +1,40 @@
-def build_prompt(sample, task_name, model_name=None):
+from __future__ import annotations
+
+from typing import Any
+
+
+def build_qa_prompt(context: str, question: str) -> str:
+    return (
+        "Context:\n"
+        f"{context}\n\n"
+        "Question:\n"
+        f"{question}\n\n"
+        'Return only the shortest answer span from the context. If the answer is not '
+        'in the context, return "unknown".\n'
+        "Answer:"
+    )
+
+
+def build_summarization_prompt(context: str) -> str:
+    return (
+        "Summarize the following document in 2-4 concise, factual sentences.\n\n"
+        "Document:\n"
+        f"{context}\n\n"
+        "Summary:"
+    )
+
+
+def build_prompt(
+    sample: dict[str, Any],
+    task_name: str,
+    model_name: str | None = None,
+) -> str:
+    del model_name
     if task_name == "qa":
-        return f"""Read the following context and answer the question using only information from the context.
-
-Instructions:
-- Give a short answer only.
-- Do not explain.
-- Do not summarize the document.
-- Do not repeat the question.
-- If the answer is not clearly supported by the context, output exactly: unsupported.
-
-Context:
-{sample['context']}
-
-Question:
-{sample['question']}
-
-Answer:
-"""
-    elif task_name == "summarization":
-        return f"""Summarize the following document in 2-4 sentences.
-
-Instructions:
-- Focus on the main findings only.
-- Keep the summary concise and factual.
-- Do not copy long parts verbatim.
-- Do not add information not supported by the document.
-
-Document:
-{sample['context']}
-
-Summary:
-"""
-    else:
-        raise ValueError(f"Unsupported task_name: {task_name}")
+        return build_qa_prompt(
+            context=str(sample["context"]),
+            question=str(sample["question"]),
+        )
+    if task_name == "summarization":
+        return build_summarization_prompt(context=str(sample["context"]))
+    raise ValueError(f"Unsupported task_name: {task_name}")

@@ -1,40 +1,101 @@
+from __future__ import annotations
+
 import re
+import string
+from collections import Counter
+from collections.abc import Iterable
+
+
+INSTRUCTION_ARTIFACTS = (
+    "do not explain",
+    "do not summarize the document",
+    "do not repeat the question",
+    "give a short answer only",
+    "return only the shortest answer",
+    "return only the answer span",
+    "use only information from the context",
+)
 
 
 def normalize_text(text: str) -> str:
-    text = str(text).lower().strip()
-    text = re.sub(r"\s+", " ", text)
-    return text
+    """Normalize text for extractive QA EM/F1 comparisons."""
+    text = str(text).lower()
+    text = "".join(ch for ch in text if ch not in string.punctuation)
+    text = re.sub(r"\b(a|an|the)\b", " ", text)
+    return " ".join(text.split())
+
+
+def _ensure_answer_list(gold_answers: str | Iterable[str] | None) -> list[str]:
+    if gold_answers is None:
+        return []
+    if isinstance(gold_answers, str):
+        return [gold_answers]
+    return [str(answer) for answer in gold_answers if str(answer).strip()]
+
+
+def _strip_instruction_artifacts(text: str) -> str:
+    cleaned = text
+    for artifact in INSTRUCTION_ARTIFACTS:
+        cleaned = re.sub(
+            rf"\b{re.escape(artifact)}\b\.?",
+            " ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    return cleaned
 
 
 def clean_qa_prediction(prediction: str) -> str:
-    text = str(prediction).strip()
+    """Remove prompt echoes and instruction artifacts from a QA generation."""
+    text = str(prediction or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
 
-    # Giữ dòng đầu tiên nếu model sinh nhiều dòng
-    text = text.split("\n")[0].strip()
+    text = _strip_instruction_artifacts(text)
 
-    # Bỏ các tiền tố kiểu "Answer: ..."
-    text = re.sub(r"^(answer|response)\s*[:\-]\s*", "", text, flags=re.IGNORECASE)
+    answer_matches = list(re.finditer(r"\banswer\s*[:\-]\s*", text, flags=re.IGNORECASE))
+    if answer_matches:
+        text = text[answer_matches[-1].end() :]
 
-    # Bỏ khoảng trắng và dấu câu cuối câu
-    text = text.strip().strip("\"' ")
-    text = re.sub(r"[ \t\r\n]+", " ", text)
+    lines: list[str] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if re.match(r"^(context|question|instructions?|document|summary)\s*:", line, re.I):
+            continue
+        lines.append(line)
+
+    text = lines[0] if lines else text.strip()
+    text = re.sub(
+        r"^(final\s+answer|response|answer)\s*[:\-]\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"^(the\s+answer\s+is|answer\s+is)\s+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = text.strip().strip("\"'` ")
+    text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[.,;:!?]+$", "", text)
-
     return text.strip()
 
 
 def extract_short_answer(prediction: str) -> str:
-    """
-    Heuristic cho QA ngắn:
-    - 'The capital of France is Paris.' -> 'Paris'
-    - 'The moon orbits the Earth.' -> 'the Earth'
-    - 'Python is used for web development...' -> 'web development...'
-    """
+    """Heuristically turn a full-sentence QA output into a short answer."""
     text = clean_qa_prediction(prediction)
-    lowered = text.lower()
+    if not text:
+        return ""
 
-    patterns = [
+    if normalize_text(text) in {"unknown", "unsupported", "not supported"}:
+        return "unknown"
+
+    lowered = text.lower()
+    sentence_patterns = [
         " is used for ",
         " are used for ",
         " was used for ",
@@ -50,12 +111,12 @@ def extract_short_answer(prediction: str) -> str:
         " were ",
     ]
 
-    # Chỉ áp dụng heuristic cho câu ngắn-vừa
-    if len(text.split()) <= 20:
-        for pattern in patterns:
+    if len(text.split()) <= 24:
+        for pattern in sentence_patterns:
             if pattern in lowered:
-                idx = lowered.rfind(pattern)
-                candidate = text[idx + len(pattern):].strip()
+                index = lowered.rfind(pattern)
+                candidate = text[index + len(pattern) :].strip()
+                candidate = re.sub(r"^(the answer is|answer is)\s+", "", candidate, flags=re.I)
                 candidate = re.sub(r"[.,;:!?]+$", "", candidate).strip()
                 if candidate:
                     return candidate
@@ -63,23 +124,23 @@ def extract_short_answer(prediction: str) -> str:
     return text
 
 
-def exact_match(prediction: str, gold_answers: list[str]) -> float:
-    pred = normalize_text(prediction)
-    return max(float(pred == normalize_text(g)) for g in gold_answers)
+def exact_match(prediction: str, gold_answers: str | Iterable[str] | None) -> float:
+    """Return 1.0 when the prediction exactly matches any gold answer."""
+    answers = _ensure_answer_list(gold_answers)
+    if not answers:
+        return 0.0
+    normalized_prediction = normalize_text(prediction)
+    return max(float(normalized_prediction == normalize_text(answer)) for answer in answers)
 
 
 def f1_score_single(prediction: str, gold_answer: str) -> float:
     pred_tokens = normalize_text(prediction).split()
     gold_tokens = normalize_text(gold_answer).split()
 
-    if len(pred_tokens) == 0 or len(gold_tokens) == 0:
+    if not pred_tokens or not gold_tokens:
         return float(pred_tokens == gold_tokens)
 
-    common = {}
-    for token in pred_tokens:
-        if token in gold_tokens:
-            common[token] = min(pred_tokens.count(token), gold_tokens.count(token))
-
+    common = Counter(pred_tokens) & Counter(gold_tokens)
     num_same = sum(common.values())
     if num_same == 0:
         return 0.0
@@ -89,5 +150,13 @@ def f1_score_single(prediction: str, gold_answer: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def max_f1_score(prediction: str, gold_answers: list[str]) -> float:
-    return max(f1_score_single(prediction, answer) for answer in gold_answers)
+def f1_score(prediction: str, gold_answers: str | Iterable[str] | None) -> float:
+    """Compute token-level F1 against the best matching gold answer."""
+    answers = _ensure_answer_list(gold_answers)
+    if not answers:
+        return 0.0
+    return max(f1_score_single(prediction, answer) for answer in answers)
+
+
+def max_f1_score(prediction: str, gold_answers: str | Iterable[str] | None) -> float:
+    return f1_score(prediction, gold_answers)

@@ -1,5 +1,5 @@
 {"id":"qa_001","task":"qa","context":"Paris is the capital of France.","question":"What is the capital of France?","answers":["Paris"]}
 {"id":"qa_002","task":"qa","context":"The moon orbits the Earth.","question":"What does the moon orbit?","answers":["the Earth","Earth"]}
-{"id":"qa_003","task":"qa","context":"Water boils at 100 degrees Celsius under standard atmospheric pressure.","question":"At what temperature does water boil under standard atmospheric pressure?","answers":["100 degrees Celsius","100°C","100 degrees C"]}
+{"id":"qa_003","task":"qa","context":"Water boils at 100 degrees Celsius under standard atmospheric pressure.","question":"At what temperature does water boil under standard atmospheric pressure?","answers":["100 degrees Celsius","100 degrees C","100 C"]}
 {"id":"qa_004","task":"qa","context":"Python is a popular programming language used for web development, data science, and automation.","question":"What is Python used for?","answers":["web development, data science, and automation","web development, data science and automation"]}
 {"id":"qa_005","task":"qa","context":"The Great Wall of China is one of the most famous historical structures in the world.","question":"Which country is the Great Wall located in?","answers":["China"]}

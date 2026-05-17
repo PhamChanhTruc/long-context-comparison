@@ -1,0 +1,18 @@
+torch
+transformers
+accelerate
+sentencepiece
+evaluate
+rouge_score
+pandas
+pyyaml
+datasets
+tqdm
+numpy
+pytest
+
+# Optional: needed only for CUDA 4-bit quantized decoder-only runs.
+# bitsandbytes
+
+# Optional: enables simple comparison figures in scripts/compare_metrics.py.
+# matplotlib

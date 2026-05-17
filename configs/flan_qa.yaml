@@ -1,9 +1,12 @@
 project_name: "long-context-comparison"
+run_name: "flan_qa"
 
 task:
   name: "qa"
   data_path: "data/processed/pilot_qa.jsonl"
   max_samples: 5
+  shuffle: false
+  seed: 42
 
 model:
   name: "google/flan-t5-base"

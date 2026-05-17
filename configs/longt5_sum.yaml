@@ -1,9 +1,12 @@
 project_name: "long-context-comparison"
+run_name: "longt5_sum"
 
 task:
   name: "summarization"
   data_path: "data/processed/pilot_sum.jsonl"
   max_samples: 5
+  shuffle: false
+  seed: 42
 
 model:
   name: "google/long-t5-tglobal-base"

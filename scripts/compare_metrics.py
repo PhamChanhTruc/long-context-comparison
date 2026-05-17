@@ -1,9 +1,15 @@
+from __future__ import annotations
+
+import logging
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-import pandas as pd
+
+LOGGER = logging.getLogger(__name__)
 
 
 def round_numeric(df: pd.DataFrame, digits: int = 4) -> pd.DataFrame:
@@ -13,190 +19,185 @@ def round_numeric(df: pd.DataFrame, digits: int = 4) -> pd.DataFrame:
     return df
 
 
+def warn_before_overwrite(path: Path) -> None:
+    if path.exists():
+        LOGGER.warning("Overwriting existing comparison output: %s", path)
+
+
 def print_section(title: str, df: pd.DataFrame) -> None:
     print("\n" + "=" * 100)
     print(title)
     print("=" * 100)
-    if df.empty:
-        print("No rows.")
-    else:
-        print(df.to_string(index=False))
+    print("No rows." if df.empty else df.to_string(index=False))
 
 
-def main():
-    metrics_dir = Path("outputs/metrics")
-    files = sorted(
-        [f for f in metrics_dir.glob("*_metrics.csv") if f.name != "all_metrics_comparison.csv"]
-    )
-
+def read_metric_files(metrics_dir: Path) -> pd.DataFrame:
+    files = sorted(metrics_dir.glob("*_metrics.csv"))
     if not files:
-        print("No metric files found in outputs/metrics")
+        raise FileNotFoundError(f"No per-run metric files found in {metrics_dir}")
+
+    frames: list[pd.DataFrame] = []
+    for file in files:
+        frame = pd.read_csv(file)
+        frame["source_file"] = file.name
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
+def add_main_score(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    main_scores: list[float | None] = []
+    main_score_names: list[str | None] = []
+
+    for _, row in df.iterrows():
+        task = row.get("task")
+        if task == "qa":
+            for column in ("post_f1", "f1", "raw_f1"):
+                if column in row and pd.notna(row[column]):
+                    main_scores.append(float(row[column]))
+                    main_score_names.append(column)
+                    break
+            else:
+                main_scores.append(None)
+                main_score_names.append(None)
+        elif task == "summarization":
+            score = row.get("rougeL")
+            main_scores.append(float(score) if pd.notna(score) else None)
+            main_score_names.append("rougeL" if pd.notna(score) else None)
+        else:
+            main_scores.append(None)
+            main_score_names.append(None)
+
+    df["main_score_name"] = main_score_names
+    df["main_score"] = main_scores
+    return df
+
+
+def ordered_columns(df: pd.DataFrame) -> list[str]:
+    preferred = [
+        "task",
+        "model_name",
+        "model",
+        "model_type",
+        "architecture",
+        "num_samples",
+        "max_samples",
+        "max_input_tokens",
+        "max_new_tokens",
+        "raw_exact_match",
+        "raw_f1",
+        "post_exact_match",
+        "post_f1",
+        "rouge1",
+        "rouge2",
+        "rougeL",
+        "main_score_name",
+        "main_score",
+        "total_latency_sec",
+        "avg_latency_sec",
+        "avg_input_tokens",
+        "avg_output_tokens",
+        "num_truncated",
+        "source_file",
+    ]
+    return [column for column in preferred if column in df.columns]
+
+
+def save_optional_figures(df: pd.DataFrame, figures_dir: Path) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        LOGGER.info("Skipping figures because matplotlib is unavailable: %s", exc)
         return
 
-    dfs = []
-    for file in files:
-        df = pd.read_csv(file)
-        df["source_file"] = file.name
-        dfs.append(df)
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    for task_name, task_df in df.groupby("task"):
+        task_df = task_df.dropna(subset=["main_score"]).copy()
+        if task_df.empty:
+            continue
+        labels = task_df.get("model_name", task_df.get("model", task_df["source_file"]))
+        labels = labels.astype(str).str.split("/").str[-1]
 
-    all_metrics = pd.concat(dfs, ignore_index=True)
+        fig_width = max(6, min(12, 1.5 * len(task_df)))
+        plt.figure(figsize=(fig_width, 4))
+        plt.bar(labels, task_df["main_score"])
+        plt.ylabel(task_df["main_score_name"].iloc[0] or "main score")
+        plt.title(f"{task_name} model comparison")
+        plt.xticks(rotation=30, ha="right")
+        plt.tight_layout()
+        out_path = figures_dir / f"{task_name}_main_score.png"
+        warn_before_overwrite(out_path)
+        plt.savefig(out_path, dpi=150)
+        plt.close()
+        LOGGER.info("Saved figure to %s", out_path)
 
-    # Chuẩn hóa cột để dễ nhìn
-    desired_cols = [
-        "task",
-        "model",
-        "architecture",
-        "num_samples",
-        # QA metrics
-        "raw_exact_match",
-        "raw_f1",
-        "post_exact_match",
-        "post_f1",
-        # old QA metrics fallback
-        "exact_match",
-        "f1",
-        # summarization metrics
-        "rouge1",
-        "rouge2",
-        "rougeL",
-        "rougeLsum",
-        # efficiency
-        "avg_latency_sec",
-        "avg_input_tokens",
-        "avg_output_tokens",
-        "source_file",
-    ]
 
-    existing_cols = [c for c in desired_cols if c in all_metrics.columns]
-    all_metrics = all_metrics[existing_cols]
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    metrics_dir = Path("outputs/metrics")
+    figures_dir = Path("outputs/figures")
+
+    all_metrics = read_metric_files(metrics_dir)
+    all_metrics = add_main_score(all_metrics)
+    all_metrics = all_metrics[ordered_columns(all_metrics)]
+    sort_columns = ["task", "main_score"]
+    sort_ascending = [True, False]
+    if "avg_latency_sec" in all_metrics.columns:
+        sort_columns.append("avg_latency_sec")
+        sort_ascending.append(True)
+    all_metrics = all_metrics.sort_values(
+        by=sort_columns,
+        ascending=sort_ascending,
+        na_position="last",
+    )
     all_metrics = round_numeric(all_metrics, digits=4)
 
-    # Lưu full table
     out_path = metrics_dir / "all_metrics_comparison.csv"
+    warn_before_overwrite(out_path)
     all_metrics.to_csv(out_path, index=False, encoding="utf-8-sig")
 
-    # -----------------------------
-    # QA view
-    # -----------------------------
     qa_df = all_metrics[all_metrics["task"] == "qa"].copy()
-
-    qa_cols_priority = [
-        "task",
-        "model",
-        "architecture",
-        "num_samples",
-        "raw_exact_match",
-        "raw_f1",
-        "post_exact_match",
-        "post_f1",
-        "exact_match",
-        "f1",
-        "avg_latency_sec",
-        "avg_input_tokens",
-        "avg_output_tokens",
-        "source_file",
-    ]
-    qa_cols = [c for c in qa_cols_priority if c in qa_df.columns]
-    qa_df = qa_df[qa_cols]
-
-    # Sắp xếp QA: ưu tiên post_f1, nếu không có thì dùng f1/raw_f1
-    if "post_f1" in qa_df.columns:
-        qa_df = qa_df.sort_values(by=["post_f1", "avg_latency_sec"], ascending=[False, True])
-    elif "f1" in qa_df.columns:
-        qa_df = qa_df.sort_values(by=["f1", "avg_latency_sec"], ascending=[False, True])
-    elif "raw_f1" in qa_df.columns:
-        qa_df = qa_df.sort_values(by=["raw_f1", "avg_latency_sec"], ascending=[False, True])
-
     qa_out = metrics_dir / "qa_metrics_comparison.csv"
+    warn_before_overwrite(qa_out)
     qa_df.to_csv(qa_out, index=False, encoding="utf-8-sig")
 
-    # -----------------------------
-    # Summarization view
-    # -----------------------------
     sum_df = all_metrics[all_metrics["task"] == "summarization"].copy()
-
-    sum_cols_priority = [
-        "task",
-        "model",
-        "architecture",
-        "num_samples",
-        "rouge1",
-        "rouge2",
-        "rougeL",
-        "rougeLsum",
-        "avg_latency_sec",
-        "avg_input_tokens",
-        "avg_output_tokens",
-        "source_file",
-    ]
-    sum_cols = [c for c in sum_cols_priority if c in sum_df.columns]
-    sum_df = sum_df[sum_cols]
-
-    # Sắp xếp summarization: ưu tiên rougeL
-    if "rougeL" in sum_df.columns:
-        sum_df = sum_df.sort_values(by=["rougeL", "avg_latency_sec"], ascending=[False, True])
-
     sum_out = metrics_dir / "summarization_metrics_comparison.csv"
+    warn_before_overwrite(sum_out)
     sum_df.to_csv(sum_out, index=False, encoding="utf-8-sig")
 
-    # -----------------------------
-    # Lightweight leaderboard
-    # -----------------------------
-    leaderboard_rows = []
-
-    for _, row in qa_df.iterrows():
-        score = None
-        score_name = None
-
-        if "post_f1" in row and pd.notna(row.get("post_f1", None)):
-            score = row["post_f1"]
-            score_name = "post_f1"
-        elif "f1" in row and pd.notna(row.get("f1", None)):
-            score = row["f1"]
-            score_name = "f1"
-        elif "raw_f1" in row and pd.notna(row.get("raw_f1", None)):
-            score = row["raw_f1"]
-            score_name = "raw_f1"
-
-        leaderboard_rows.append({
-            "task": "qa",
-            "model": row["model"],
-            "architecture": row["architecture"],
-            "main_score_name": score_name,
-            "main_score": score,
-            "avg_latency_sec": row.get("avg_latency_sec"),
-            "avg_output_tokens": row.get("avg_output_tokens"),
-        })
-
-    for _, row in sum_df.iterrows():
-        leaderboard_rows.append({
-            "task": "summarization",
-            "model": row["model"],
-            "architecture": row["architecture"],
-            "main_score_name": "rougeL" if "rougeL" in row else None,
-            "main_score": row.get("rougeL"),
-            "avg_latency_sec": row.get("avg_latency_sec"),
-            "avg_output_tokens": row.get("avg_output_tokens"),
-        })
-
-    leaderboard_df = pd.DataFrame(leaderboard_rows)
-    leaderboard_df = round_numeric(leaderboard_df, digits=4)
-
+    leaderboard_cols = [
+        column
+        for column in (
+            "task",
+            "model_name",
+            "model",
+            "model_type",
+            "architecture",
+            "main_score_name",
+            "main_score",
+            "avg_latency_sec",
+            "avg_output_tokens",
+            "source_file",
+        )
+        if column in all_metrics.columns
+    ]
+    leaderboard = all_metrics[leaderboard_cols].copy()
     leaderboard_out = metrics_dir / "leaderboard.csv"
-    leaderboard_df.to_csv(leaderboard_out, index=False, encoding="utf-8-sig")
+    warn_before_overwrite(leaderboard_out)
+    leaderboard.to_csv(leaderboard_out, index=False, encoding="utf-8-sig")
 
-    # -----------------------------
-    # Print to terminal
-    # -----------------------------
-    print(f"Saved full comparison file to: {out_path}")
-    print(f"Saved QA comparison file to: {qa_out}")
-    print(f"Saved summarization comparison file to: {sum_out}")
-    print(f"Saved leaderboard file to: {leaderboard_out}")
+    save_optional_figures(all_metrics, figures_dir)
+
+    LOGGER.info("Saved full comparison to %s", out_path)
+    LOGGER.info("Saved QA comparison to %s", qa_out)
+    LOGGER.info("Saved summarization comparison to %s", sum_out)
+    LOGGER.info("Saved leaderboard to %s", leaderboard_out)
 
     print_section("FULL METRICS TABLE", all_metrics)
     print_section("QA COMPARISON", qa_df)
     print_section("SUMMARIZATION COMPARISON", sum_df)
-    print_section("LEADERBOARD", leaderboard_df)
+    print_section("LEADERBOARD", leaderboard)
 
 
 if __name__ == "__main__":
