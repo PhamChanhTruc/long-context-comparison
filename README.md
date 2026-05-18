@@ -59,6 +59,9 @@ Pilot files are included:
 - `data/processed/pilot_qa.jsonl`
 - `data/processed/pilot_sum.jsonl`
 
+These are small local files for quick debugging, smoke tests, and pipeline checks.
+They are not the main experiment dataset.
+
 Validate the JSONL files:
 
 ```bash
@@ -69,14 +72,33 @@ Each QA line must contain `id`, `task`, `context`, `question`, and a non-empty
 `answers` list. Each summarization line must contain `id`, `task`, `context`, and
 `reference`.
 
-Optionally prepare larger validation samples from Hugging Face datasets:
+## Main Experiment Data
+
+The repository data-preparation script is the single source of truth for main
+experiment JSONL files. Kaggle and Colab notebooks should call
+`scripts/prepare_data.py` instead of duplicating Qasper or GovReport processing
+logic in notebook cells.
+
+Prepare main validation samples from Hugging Face datasets:
 
 ```bash
-python scripts/prepare_data.py --qa_samples 50 --sum_samples 50
+python scripts/prepare_data.py --qa_samples 1000 --sum_samples 1000 --seed 42 --output_dir data/processed
 ```
 
 This writes `data/processed/main_qa.jsonl` and `data/processed/main_sum.jsonl`.
-If the datasets cannot be downloaded, the script fails with a clear message.
+Use `--qa_samples 0` or `--sum_samples 0` to write all valid examples for that
+task. The script shuffles valid examples with the fixed seed before sample
+selection, so repeated runs with the same inputs and seed are deterministic.
+
+Validate prepared main data:
+
+```bash
+python scripts/validate_data.py data/processed/main_qa.jsonl data/processed/main_sum.jsonl
+```
+
+If datasets cannot be downloaded in a local environment, the script fails with a
+clear message. Kaggle/Colab should install the requirements and run the same
+command so the notebook uses the repository pipeline directly.
 
 ## Running Inference
 
@@ -173,8 +195,8 @@ python -m pytest
 ```
 
 These tests do not download models. They validate JSONL loading, config loading,
-multiple-answer QA metrics, QA post-processing, and preservation of all gold answers
-in prediction outputs.
+data-preparation helper behavior, multiple-answer QA metrics, QA post-processing,
+and preservation of all gold answers in prediction outputs.
 
 ## Known Limitations
 
