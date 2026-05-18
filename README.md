@@ -79,7 +79,7 @@ experiment JSONL files. Kaggle and Colab notebooks should call
 `scripts/prepare_data.py` instead of duplicating Qasper or GovReport processing
 logic in notebook cells.
 
-Prepare main validation samples from Hugging Face datasets:
+Prepare main validation samples from Hugging Face parquet files:
 
 ```bash
 python scripts/prepare_data.py --qa_samples 1000 --sum_samples 1000 --seed 42 --output_dir data/processed

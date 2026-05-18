@@ -15,6 +15,12 @@ from src.loaders import JsonDict, write_jsonl
 
 QASPER_DATASET = "allenai/qasper"
 GOVREPORT_DATASET = "ccdv/govreport-summarization"
+QASPER_PARQUET_URLS = {
+    "validation": "https://huggingface.co/datasets/allenai/qasper/resolve/refs%2Fconvert%2Fparquet/qasper/validation/0000.parquet"
+}
+GOVREPORT_PARQUET_URLS = {
+    "validation": "https://huggingface.co/datasets/ccdv/govreport-summarization/resolve/main/document/validation-00000-of-00001.parquet"
+}
 
 
 def require_datasets():
@@ -54,6 +60,23 @@ def flatten_qasper_full_text(full_text: Any) -> str:
                 if section_text:
                     parts.append(section_text)
     elif isinstance(full_text, dict):
+        section_names = full_text.get("section_name")
+        paragraph_groups = full_text.get("paragraphs")
+        if isinstance(section_names, list) and isinstance(paragraph_groups, list):
+            for index in range(max(len(section_names), len(paragraph_groups))):
+                if index < len(section_names):
+                    section_name = clean_text(section_names[index])
+                    if section_name:
+                        parts.append(section_name)
+                paragraphs = paragraph_groups[index] if index < len(paragraph_groups) else []
+                if isinstance(paragraphs, list):
+                    parts.extend(clean_text(paragraph) for paragraph in paragraphs)
+                else:
+                    paragraph_text = clean_text(paragraphs)
+                    if paragraph_text:
+                        parts.append(paragraph_text)
+            return "\n".join(part for part in parts if part)
+
         for section_name, paragraphs in full_text.items():
             section_name_text = clean_text(section_name)
             if section_name_text:
@@ -93,6 +116,18 @@ def _yes_no_answer(value: Any) -> str:
 
 def qasper_answer_strings(answer_record: Any) -> list[str]:
     """Extract free-form, extractive-span, and yes/no answers from Qasper."""
+    if isinstance(answer_record, list):
+        answers: list[str] = []
+        for item in answer_record:
+            answers.extend(qasper_answer_strings(item))
+        return list(dict.fromkeys(answer for answer in answers if answer))
+
+    if isinstance(answer_record, dict) and isinstance(answer_record.get("answer"), list):
+        answers = []
+        for item in answer_record["answer"]:
+            answers.extend(qasper_answer_strings(item))
+        return list(dict.fromkeys(answer for answer in answers if answer))
+
     answer = _answer_payload(answer_record)
     if not answer or answer.get("unanswerable"):
         return []
@@ -160,14 +195,44 @@ def _qasper_question_rows(record: dict[str, Any], context: str) -> Iterable[Json
             }
         return
 
+    if isinstance(qas, dict):
+        questions = qas.get("question") or []
+        question_ids = qas.get("question_id") or []
+        answer_groups = qas.get("answers") or []
+        if isinstance(questions, list):
+            for index, raw_question in enumerate(questions):
+                question = clean_text(raw_question)
+                raw_answers = (
+                    answer_groups[index]
+                    if isinstance(answer_groups, list) and index < len(answer_groups)
+                    else []
+                )
+                answers = qasper_answer_strings(raw_answers)
+                if not question or not answers:
+                    continue
+
+                question_id = (
+                    clean_text(question_ids[index])
+                    if isinstance(question_ids, list) and index < len(question_ids)
+                    else ""
+                )
+                paper_id = clean_text(record.get("id"))
+                row_id = question_id or (
+                    f"{paper_id}_q{index:04d}" if paper_id else f"qasper_{index:04d}"
+                )
+                yield {
+                    "id": row_id,
+                    "task": "qa",
+                    "context": context,
+                    "question": question,
+                    "answers": answers,
+                }
+        return
+
     question = clean_text(record.get("question"))
     answers: list[str] = []
     raw_answers = record.get("answers") or record.get("answer") or []
-    if isinstance(raw_answers, list):
-        for answer_record in raw_answers:
-            answers.extend(qasper_answer_strings(answer_record))
-    else:
-        answers.extend(qasper_answer_strings(raw_answers))
+    answers.extend(qasper_answer_strings(raw_answers))
     answers = list(dict.fromkeys(answer for answer in answers if answer))
     if question and answers:
         yield {
@@ -222,15 +287,19 @@ def select_deterministic_rows(
     return ordered[:max_samples]
 
 
-def prepare_qasper(output_path: Path, max_samples: int, seed: int) -> int:
+def load_validation_parquet(dataset_name: str, data_files: dict[str, str]):
     load_dataset = require_datasets()
     try:
-        dataset = load_dataset(QASPER_DATASET, split="validation")
+        return load_dataset("parquet", data_files=data_files, split="validation")
     except Exception as exc:
         raise RuntimeError(
-            f"Could not load {QASPER_DATASET} validation data. Check internet "
+            f"Could not load {dataset_name} validation parquet data. Check internet "
             "access, Hugging Face availability, authentication, or cached datasets."
         ) from exc
+
+
+def prepare_qasper(output_path: Path, max_samples: int, seed: int) -> int:
+    dataset = load_validation_parquet(QASPER_DATASET, QASPER_PARQUET_URLS)
 
     rows = select_deterministic_rows(
         collect_qasper_rows(dataset),
@@ -242,14 +311,7 @@ def prepare_qasper(output_path: Path, max_samples: int, seed: int) -> int:
 
 
 def prepare_govreport(output_path: Path, max_samples: int, seed: int) -> int:
-    load_dataset = require_datasets()
-    try:
-        dataset = load_dataset(GOVREPORT_DATASET, split="validation")
-    except Exception as exc:
-        raise RuntimeError(
-            f"Could not load {GOVREPORT_DATASET} validation data. Check internet "
-            "access, Hugging Face availability, authentication, or cached datasets."
-        ) from exc
+    dataset = load_validation_parquet(GOVREPORT_DATASET, GOVREPORT_PARQUET_URLS)
 
     rows = select_deterministic_rows(
         collect_govreport_rows(dataset),
