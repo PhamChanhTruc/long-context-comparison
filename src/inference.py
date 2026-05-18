@@ -23,25 +23,19 @@ class PromptBundle:
     truncated_context_tokens: int
 
 
+@dataclass(frozen=True)
+class EncodedInputs:
+    tensors: dict[str, torch.Tensor]
+    input_tokens: int
+    truncated: bool
+
+
 def _uses_chat_template(tokenizer: Any, architecture: str) -> bool:
     return architecture == "decoder-only" and bool(getattr(tokenizer, "chat_template", None))
 
 
 def _chat_messages(prompt: str) -> list[dict[str, str]]:
     return [{"role": "user", "content": prompt}]
-
-
-def _prompt_token_ids(tokenizer: Any, prompt: str, architecture: str) -> list[int]:
-    if _uses_chat_template(tokenizer, architecture):
-        token_ids = tokenizer.apply_chat_template(
-            _chat_messages(prompt),
-            tokenize=True,
-            add_generation_prompt=True,
-        )
-        if token_ids and isinstance(token_ids[0], list):
-            return list(token_ids[0])
-        return list(token_ids)
-    return tokenizer.encode(prompt, add_special_tokens=True)
 
 
 def _build_prompt(
@@ -67,7 +61,12 @@ def _truncate_prompt_context(
 ) -> PromptBundle:
     context = str(sample["context"])
     prompt = _build_prompt(sample, task_name, model_name, build_prompt_fn, context)
-    input_tokens = len(_prompt_token_ids(tokenizer, prompt, architecture))
+    input_tokens = _generation_prompt_token_count(
+        tokenizer=tokenizer,
+        prompt=prompt,
+        architecture=architecture,
+        max_input_tokens=max_input_tokens,
+    )
     if input_tokens <= max_input_tokens:
         return PromptBundle(
             prompt=prompt,
@@ -77,14 +76,30 @@ def _truncate_prompt_context(
         )
 
     empty_prompt = _build_prompt(sample, task_name, model_name, build_prompt_fn, "")
-    empty_prompt_tokens = len(_prompt_token_ids(tokenizer, empty_prompt, architecture))
+    empty_prompt_tokens = _generation_prompt_token_count(
+        tokenizer=tokenizer,
+        prompt=empty_prompt,
+        architecture=architecture,
+        max_input_tokens=max_input_tokens,
+    )
+    context_token_ids = tokenizer.encode(context, add_special_tokens=False)
     if empty_prompt_tokens >= max_input_tokens:
-        raise ValueError(
-            f"max_input_tokens={max_input_tokens} is too small to fit the fixed "
-            f"{task_name} prompt/question ({empty_prompt_tokens} tokens)."
+        LOGGER.warning(
+            "Truncated all context for %s sample %s, but the fixed prompt/question "
+            "still has %s tokens for max_input_tokens=%s; final tokenizer truncation "
+            "will cap the input.",
+            task_name,
+            sample.get("id", "<unknown>"),
+            empty_prompt_tokens,
+            max_input_tokens,
+        )
+        return PromptBundle(
+            prompt=empty_prompt,
+            input_tokens=empty_prompt_tokens,
+            truncated=True,
+            truncated_context_tokens=len(context_token_ids),
         )
 
-    context_token_ids = tokenizer.encode(context, add_special_tokens=False)
     low = 0
     high = len(context_token_ids)
     best_prompt = empty_prompt
@@ -105,7 +120,12 @@ def _truncate_prompt_context(
             build_prompt_fn,
             candidate_context,
         )
-        candidate_len = len(_prompt_token_ids(tokenizer, candidate_prompt, architecture))
+        candidate_len = _generation_prompt_token_count(
+            tokenizer=tokenizer,
+            prompt=candidate_prompt,
+            architecture=architecture,
+            max_input_tokens=max_input_tokens,
+        )
         if candidate_len <= max_input_tokens:
             best_prompt = candidate_prompt
             best_len = candidate_len
@@ -131,49 +151,177 @@ def _truncate_prompt_context(
     )
 
 
+def _input_ids_length(encoded: dict[str, torch.Tensor]) -> int:
+    input_ids = encoded["input_ids"]
+    if input_ids.ndim == 1:
+        return input_ids.shape[0]
+    return input_ids.shape[1]
+
+
+def _normalise_encoded(encoded: Any) -> dict[str, torch.Tensor]:
+    if isinstance(encoded, torch.Tensor):
+        return {
+            "input_ids": encoded,
+            "attention_mask": torch.ones_like(encoded),
+        }
+    return dict(encoded)
+
+
+def _slice_encoded_to_max(
+    encoded: dict[str, torch.Tensor],
+    max_input_tokens: int,
+) -> dict[str, torch.Tensor]:
+    sliced: dict[str, torch.Tensor] = {}
+    for key, value in encoded.items():
+        if isinstance(value, torch.Tensor) and value.ndim >= 2:
+            sliced[key] = value[:, :max_input_tokens]
+        elif isinstance(value, torch.Tensor) and value.ndim == 1:
+            sliced[key] = value[:max_input_tokens]
+        else:
+            sliced[key] = value
+    return sliced
+
+
+def _tokenize_chat_prompt(
+    tokenizer: Any,
+    prompt: str,
+    truncation: bool,
+    max_input_tokens: int,
+) -> dict[str, torch.Tensor]:
+    kwargs: dict[str, Any] = {
+        "tokenize": True,
+        "add_generation_prompt": True,
+        "return_tensors": "pt",
+        "return_dict": True,
+    }
+    if truncation:
+        kwargs.update({"truncation": True, "max_length": max_input_tokens})
+
+    try:
+        return _normalise_encoded(
+            tokenizer.apply_chat_template(_chat_messages(prompt), **kwargs)
+        )
+    except TypeError:
+        kwargs.pop("return_dict", None)
+
+    try:
+        return _normalise_encoded(
+            tokenizer.apply_chat_template(_chat_messages(prompt), **kwargs)
+        )
+    except TypeError:
+        if truncation:
+            kwargs.pop("truncation", None)
+            kwargs.pop("max_length", None)
+        encoded = _normalise_encoded(
+            tokenizer.apply_chat_template(_chat_messages(prompt), **kwargs)
+        )
+        if truncation:
+            return _slice_encoded_to_max(encoded, max_input_tokens)
+        return encoded
+
+
+def _tokenize_plain_prompt(
+    tokenizer: Any,
+    prompt: str,
+    truncation: bool,
+    max_input_tokens: int,
+) -> dict[str, torch.Tensor]:
+    kwargs: dict[str, Any] = {"return_tensors": "pt", "truncation": truncation}
+    if truncation:
+        kwargs["max_length"] = max_input_tokens
+
+    try:
+        return _normalise_encoded(tokenizer(prompt, **kwargs))
+    except TypeError:
+        if truncation:
+            kwargs.pop("max_length", None)
+        encoded = _normalise_encoded(tokenizer(prompt, **kwargs))
+        if truncation:
+            return _slice_encoded_to_max(encoded, max_input_tokens)
+        return encoded
+
+
+def _tokenize_generation_prompt(
+    tokenizer: Any,
+    prompt: str,
+    architecture: str,
+    truncation: bool,
+    max_input_tokens: int,
+) -> dict[str, torch.Tensor]:
+    if _uses_chat_template(tokenizer, architecture):
+        return _tokenize_chat_prompt(
+            tokenizer=tokenizer,
+            prompt=prompt,
+            truncation=truncation,
+            max_input_tokens=max_input_tokens,
+        )
+    return _tokenize_plain_prompt(
+        tokenizer=tokenizer,
+        prompt=prompt,
+        truncation=truncation,
+        max_input_tokens=max_input_tokens,
+    )
+
+
+def _generation_prompt_token_count(
+    tokenizer: Any,
+    prompt: str,
+    architecture: str,
+    max_input_tokens: int,
+) -> int:
+    encoded = _tokenize_generation_prompt(
+        tokenizer=tokenizer,
+        prompt=prompt,
+        architecture=architecture,
+        truncation=False,
+        max_input_tokens=max_input_tokens,
+    )
+    return _input_ids_length(encoded)
+
+
 def _encode_generation_inputs(
     tokenizer: Any,
     prompt: str,
     architecture: str,
     device: str,
     max_input_tokens: int,
-) -> dict[str, torch.Tensor]:
-    if _uses_chat_template(tokenizer, architecture):
-        try:
-            encoded = tokenizer.apply_chat_template(
-                _chat_messages(prompt),
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-                return_dict=True,
-            )
-        except TypeError:
-            input_ids = tokenizer.apply_chat_template(
-                _chat_messages(prompt),
-                tokenize=True,
-                add_generation_prompt=True,
-                return_tensors="pt",
-            )
-            encoded = {
-                "input_ids": input_ids,
-                "attention_mask": torch.ones_like(input_ids),
-            }
-        if isinstance(encoded, torch.Tensor):
-            encoded = {
-                "input_ids": encoded,
-                "attention_mask": torch.ones_like(encoded),
-            }
-    else:
-        encoded = tokenizer(prompt, return_tensors="pt", truncation=False)
+) -> EncodedInputs:
+    encoded = _tokenize_generation_prompt(
+        tokenizer=tokenizer,
+        prompt=prompt,
+        architecture=architecture,
+        truncation=False,
+        max_input_tokens=max_input_tokens,
+    )
 
-    input_tokens = encoded["input_ids"].shape[1]
+    input_tokens = _input_ids_length(encoded)
     if input_tokens > max_input_tokens:
-        raise ValueError(
-            f"Tokenized prompt has {input_tokens} tokens, exceeding "
-            f"max_input_tokens={max_input_tokens}. This should have been handled "
-            "before generation."
+        LOGGER.warning(
+            "Final tokenized prompt has %s tokens, exceeding max_input_tokens=%s; "
+            "applying tokenizer truncation before generation.",
+            input_tokens,
+            max_input_tokens,
         )
-    return {key: value.to(device) for key, value in encoded.items()}
+        encoded = _tokenize_generation_prompt(
+            tokenizer=tokenizer,
+            prompt=prompt,
+            architecture=architecture,
+            truncation=True,
+            max_input_tokens=max_input_tokens,
+        )
+        if _input_ids_length(encoded) > max_input_tokens:
+            encoded = _slice_encoded_to_max(encoded, max_input_tokens)
+        return EncodedInputs(
+            tensors={key: value.to(device) for key, value in encoded.items()},
+            input_tokens=_input_ids_length(encoded),
+            truncated=True,
+        )
+
+    return EncodedInputs(
+        tensors={key: value.to(device) for key, value in encoded.items()},
+        input_tokens=input_tokens,
+        truncated=False,
+    )
 
 
 def model_context_limit(model: Any, tokenizer: Any) -> int | None:
@@ -254,13 +402,14 @@ def run_one_sample(
         max_input_tokens=max_input_tokens,
         build_prompt_fn=build_prompt_fn,
     )
-    inputs = _encode_generation_inputs(
+    encoded_inputs = _encode_generation_inputs(
         tokenizer=tokenizer,
         prompt=prompt_bundle.prompt,
         architecture=architecture,
         device=device,
         max_input_tokens=max_input_tokens,
     )
+    inputs = encoded_inputs.tensors
 
     pad_token_id = tokenizer.pad_token_id
     if pad_token_id is None:
@@ -307,10 +456,10 @@ def run_one_sample(
         "architecture": architecture,
         "max_input_tokens": max_input_tokens,
         "max_new_tokens": max_new_tokens,
-        "input_tokens": inputs["input_ids"].shape[1],
+        "input_tokens": encoded_inputs.input_tokens,
         "output_tokens": len(generated_ids),
         "latency_sec": latency_sec,
-        "truncated": prompt_bundle.truncated,
+        "truncated": prompt_bundle.truncated or encoded_inputs.truncated,
         "truncated_context_tokens": prompt_bundle.truncated_context_tokens,
         "raw_prediction": raw_prediction,
         "post_prediction": post_prediction,
